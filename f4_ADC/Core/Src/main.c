@@ -18,15 +18,15 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+
+
+/* Private includes ----------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include "stm32f4xx.h"
 #include "stm32f4xx_hal.h"
-
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
-
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -49,7 +49,7 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 uint16_t adc_data;
-char mode[6] = "MODE1";
+char mode[6] = "MODE2";
 char msg [20];
 char msg2 [50];
 volatile uint32_t counter = 0;
@@ -75,6 +75,11 @@ void LED_init(void);
 void Toggle_all_LEDs(void);
 void printTimestamp(void);
 void UART2_Init(void);
+void UART_Tx(char c);
+char UART_Rx(void);
+uint16_t read_adc(uint8_t channel);
+void Current_Measurement(void);
+void Voltage_Measurement(void);
 /* USER CODE END 0 */
 
 /**
@@ -117,29 +122,8 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  if (strcmp(mode, "MODE1\0")==0) {
-		  if (adc_check()){
-			  adc_data = adc_rx();
-			  // Voltage Measurement 30V
-			  float Vin = (adc_data*(2.9)/4095.0)*(30.0/2.72);
-			  Vin += (0.6/30.0)*Vin;
-			  sprintf(msg2, " Vol = %.3f V", Vin);
-			  printTimestamp();
-			  HAL_UART_Transmit(&huart2, (uint8_t*)(msg2), strlen(msg2), 200);
-		  }
-	  } else if (strcmp(mode, "MODE2\0")==0) {
-		  if (adc_check()){
-			  adc_data = adc_rx();
-			  // Current Measurement
-			  float Vin = (adc_data*(2.9)/4095.0);
-			  float Iin = Vin/(0.0008);
-			  sprintf(msg2, "Vol = %.3f V, I = %.3f A", Vin, Iin);
-			  printTimestamp();
-			  HAL_UART_Transmit(&huart2, (uint8_t*)(msg2), strlen(msg2), 200);
-		  }
-	  } else {
-		  __NOP();
-	  }
+	  Voltage_Measurement();
+	  Current_Measurement();
 
 	  DelayMS(500);
     /* USER CODE END WHILE */
@@ -242,12 +226,51 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+void Voltage_Measurement(void){
+	  adc_data = read_adc(9);
+	  // Voltage Measurement 30V
+	  float Vin = (adc_data*(2.9)/4095.0);
+//			  Vin = Vin*(30.0/2.72); //Correction for Voltage divider
+	  Vin += (0.6/30.0)*Vin; //Correction using observation
+	  sprintf(msg2, " Vol = %.3f V", Vin);
+	  printTimestamp();
+	  HAL_UART_Transmit(&huart2, (uint8_t*)(msg2), strlen(msg2), 200);
+}
+
+void Current_Measurement(void){
+
+	adc_data = read_adc(8);
+	// Current Measurement
+	float Vin = (adc_data*(2.9)/4095.0);
+	/*Divide Vin by the gain of the apmlifier in this line*/
+	float Iin = Vin/(0.0008);
+	sprintf(msg2, "Vol = %.3f V, I = %.3f A", Vin, Iin);
+	printTimestamp();
+	HAL_UART_Transmit(&huart2, (uint8_t*)(msg2), strlen(msg2), 200);
+}
+
 uint16_t adc_rx(void){
 
 	uint16_t adcValue = 0;
 	adcValue = ADC1->DR;
 
 	return adcValue;
+}
+
+uint16_t read_adc(uint8_t channel) {
+    // Set the channel in the sequence register
+    ADC1->SQR3 = (channel & 0x1F);  // Assuming channel is less than 16
+
+    // Start the conversion
+    ADC1->CR2 |= ADC_CR2_SWSTART;  // Start conversion
+
+    // Wait for the end of conversion
+    while (!((ADC1->SR & ADC_SR_EOC) == ADC_SR_EOC)) {}
+
+    // Read the converted value
+    uint16_t result = ADC1->DR;
+
+    return result;
 }
 
 int adc_check (void){
@@ -282,7 +305,7 @@ void adc_init(void) {
     ADC1->CR2 |= ADC_CR2_CONT; // Continuous conversion mode
     ADC1->SQR3 &= ~ADC_SQR3_SQ1; // Clear the SQ1 bits
     ADC1->SQR3 |= 9 << ADC_SQR3_SQ1_Pos; // Set the channel number in SQ1 bits (Channel 9 for PB1)
-
+    ADC1->SQR3 |= 8 << ADC_SQR3_SQ1_Pos; // Set the channel number in SQ1 bits (Channel 8 for PB0)
     // Enable the ADC
     ADC1->CR2 |= ADC_CR2_ADON;
 
@@ -355,9 +378,31 @@ void SysTick_Handler(void) {
 }
 
 void printTimestamp(void) {
-	sprintf(msg, "Time = %lu ms:", counter);
+	sprintf(msg, "   Time = %lu ms:", counter);
 	HAL_UART_Transmit(&huart2, (uint8_t*)(msg), strlen(msg), 200);
 }
+
+void UART_Tx(char c){
+
+	while ((USART1->SR & USART_SR_TXE) != USART_SR_TXE){
+		__NOP();
+	}
+	USART1->DR = c;
+}
+
+char UART_Rx(void){
+
+	char c;
+
+	while ((USART1->SR & USART_SR_RXNE) != USART_SR_RXNE){
+		__NOP();
+	}
+	c = USART1->DR;
+
+	return c;
+}
+
+
 
 /* USER CODE END 4 */
 
